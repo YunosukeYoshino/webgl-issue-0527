@@ -1,7 +1,13 @@
 import "../styles/style.css";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass";
+import { GlitchPass } from "three/examples/jsm/postprocessing/GlitchPass";
+
 import texture from "../public/matcap-porcelain-white.jpg";
+import concrete from "../public/concrete.jpeg";
+import { Wapi } from "./wapi";
 
 // DOM がパースされたことを検出するイベントを設定
 window.addEventListener(
@@ -33,7 +39,7 @@ class App {
       // 描画する空間のニアクリップ面（最近面）
       near: 0.1,
       // 描画する空間のファークリップ面（最遠面）
-      far: 100.0,
+      far: 140.0,
 
       // カメラの位置
       x: 24.0,
@@ -114,6 +120,12 @@ class App {
     this.time = 0; // 時間の初期値
     // 再帰呼び出しのための this 固定
     this.render = this.render.bind(this);
+    this.textureLoader;
+    this.composer; // エフェクトコンポーザー
+    this.renderPass; // レンダーパス
+    this.glitchPass; // グリッチパス
+    this.composer;
+    this.isRendering;
 
     // キーの押下や離す操作を検出できるようにする
     window.addEventListener(
@@ -161,7 +173,7 @@ class App {
 
     // シーン
     this.scene = new THREE.Scene();
-
+    this.textureLoader = new THREE.TextureLoader();
     // カメラ
     this.camera = new THREE.PerspectiveCamera(
       App.CAMERA_PARAM.fovy,
@@ -247,17 +259,44 @@ class App {
     cylinder03.position.y = -21;
     this.scene.add(cylinder03);
 
-    //グループの位置を修正
+    const cubeGeometry = new THREE.BoxGeometry(100, 100, 100);
+    const cubeLoader = new THREE.TextureLoader();
+    const cubeMaterial = new THREE.MeshBasicMaterial({
+      map: cubeLoader.load(concrete),
+      side: THREE.DoubleSide,
+    });
+
+    const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+    cube.position.y = 28;
+    this.scene.add(cube);
+
+    // 1. コンポーザーにレンダラを渡して初期化する
+    this.composer = new EffectComposer(this.renderer);
+    // 2. コンポーザーに、まず最初に「レンダーパス」を設定する
+    this.renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(this.renderPass);
+    // 3. コンポーザーに第２のパスとして「グリッチパス」を設定する
+    this.glitchPass = new GlitchPass();
+    this.composer.addPass(this.glitchPass);
+    // 4. グリッチパスまで終わったら画面に描画結果を出すよう指示する
+    this.glitchPass.renderToScreen = true;
+    // ※省略した場合、最後のパスが画面に自動的に出力されるようになる
+
+    // グループの位置を修正
     this.group.position.y = 10;
 
     // コントロール
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.minDistance = 10; // 最小の距離
+    this.controls.maxDistance = 40; // 最大の距離
 
     // ヘルパー
     const axesBarLength = 5.0;
     this.axesHelper = new THREE.AxesHelper(axesBarLength);
     this.axesHelper.visible = false;
     this.scene.add(this.axesHelper);
+
+    this.elementBtn = document.querySelector("button");
   }
 
   /**
@@ -271,11 +310,13 @@ class App {
     // コントロールを更新
     this.controls.update();
 
-    const rotationSpeed = 0.02; // 回転速度
+    // 羽を回転
+    let rotationSpeed = 0.02; // 回転速度
     this.fanBlades.forEach(function (blade) {
       blade.rotation.z += rotationSpeed;
     });
 
+    // グループを回転
     this.time += 0.01;
     const value = Math.sin(this.time);
     // 0.5から-0.5の範囲に変換
@@ -284,5 +325,17 @@ class App {
 
     // レンダラーで描画
     this.renderer.render(this.scene, this.camera);
+
+    // Flag
+    if (this.isRendering) {
+      this.composer.render();
+      this.time += 1;
+    }
+
+    // クリックイベント
+    this.elementBtn.addEventListener("click", () => {
+      this.isRendering = !this.isRendering; // レンダリングの状態を切り替える
+      Wapi();
+    });
   }
 }
